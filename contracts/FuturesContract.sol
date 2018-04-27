@@ -153,7 +153,7 @@ contract FuturesContract is usingOraclize {
             return "Created";
         } else if (currentPhase == Phase.Waiting) {
             return "Waiting";
-        } else if (currentPhase == Phase.Live) {
+        } else if (currentPhase == Phase.Live) { // absdfdfdf
             return "Live";
         }
     }
