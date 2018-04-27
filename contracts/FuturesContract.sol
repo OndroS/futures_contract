@@ -3,6 +3,8 @@ pragma solidity ^0.4.0;
 //INPUT PARAMETERS: 6000, 1533686400, 1500000000000000000
 //ROPSTEN TEST:
 
+//Branch Marko
+
 import "http://github.com/oraclize/ethereum-api/oraclizeAPI_0.5.sol";
 import "./libs/SafeMath.sol";
 
