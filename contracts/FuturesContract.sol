@@ -4,14 +4,18 @@ pragma solidity ^0.4.0;
 //ROPSTEN TEST:
 
 import "http://github.com/oraclize/ethereum-api/oraclizeAPI_0.5.sol";
+import "./libs/SafeMath.sol";
 
 contract FuturesContract is usingOraclize {
+
+    using SafeMath for uint256;
 
     uint public neutralExRate;
     uint public matirityTime;
     uint public collateral;
     uint public collateralOfOwner;
     uint public collateralOfTaker;
+    bool ownerIsLong;
     address owner;
     address taker;
 
@@ -19,6 +23,8 @@ contract FuturesContract is usingOraclize {
 
     event newOraclizeQuery(string description);
     event newKrakenPriceTicker(string price);
+
+    mapping(address => uint) collaterals;
 
     function FuturesContract(uint _neutralExRate, uint _matirityTime, uint _collateral){
         owner = msg.sender;
@@ -48,12 +54,14 @@ contract FuturesContract is usingOraclize {
         require(validFunding());
         if (_funder == owner) {
             require(currentPhase == Phase.Created);
-            collateralOfOwner += msg.value;
+            collaterals[_funder] += msg.value;
+            //collateralOfOwner += msg.value;
             setSalePhase(Phase.Waiting);
         } else {
             require(msg.value >= collateral);
             taker = _funder;
-            collateralOfTaker += msg.value;
+            //collateralOfTaker += msg.value;
+            collaterals[taker] += msg.value;
             setSalePhase(Phase.Live);
         }
     }
@@ -63,7 +71,8 @@ contract FuturesContract is usingOraclize {
         BTCpriceEUR = result;
         newKrakenPriceTicker(BTCpriceEUR);
         if (matirityTime >= now) {
-            liquidateByMe(BTCpriceEUR);
+            uint actualPrice = stringToUint(BTCpriceEUR);
+            liquidateByMe(actualPrice);
         } else {
             checkPrice();
         }
@@ -78,8 +87,8 @@ contract FuturesContract is usingOraclize {
         }
     }
 
-    function liquidateByMe(unit liquidationExRate) internal returns (bool) {       // liquidationPrice can be set internaly by getPrice function if conditions are met
-        uint profit = (liquidationExRate - neutralExRate);
+    function liquidateByMe(uint liquidationExRate) internal returns (bool) {       // liquidationPrice can be set internaly by getPrice function if conditions are met
+        uint256 profit = (liquidationExRate - neutralExRate);
 
         if ((profit >= 0 && ownerIsLong == true) || (profit < 0 && ownerIsLong == false)) {
 
@@ -87,17 +96,22 @@ contract FuturesContract is usingOraclize {
                 profit =-1 * profit;
             }
 
-            owner.transfer(collateralOfOwner + profit);
-            taker.transfer(collateralOfTaker - profit);
+            //owner.transfer(collateralOfOwner + profit);
+            //taker.transfer(collateralOfTaker - profit);
+
+            owner.transfer(collaterals[owner] + profit);
+            taker.transfer(collaterals[taker] - profit);
         }
 
         if(profit < 0) {
             profit = -1 * profit;
         }
 
-        owner.transfer(collateralOfOwner - profit);
-        taker.transfer(collateralOfTaker + profit);
+        //owner.transfer(collateralOfOwner - profit);
+        //taker.transfer(collateralOfTaker + profit);
 
+        owner.transfer(collaterals[owner] -= profit);
+        taker.transfer(collaterals[taker] + profit);
     }
 
 
@@ -140,5 +154,33 @@ contract FuturesContract is usingOraclize {
         } else if (currentPhase == Phase.Live) {
             return "Live";
         }
+    }
+
+    function stringToUint(string s) constant returns (uint) {
+        bytes memory b = bytes(s);
+        uint result = 0;
+        for (uint i = 0; i < b.length; i++) { // c = b[i] was not needed
+            if (b[i] >= 48 && b[i] <= 57) {
+                result = result * 10 + (uint(b[i]) - 48); // bytes and int are not compatible with the operator -.
+            }
+        }
+        return result; // this was missing
+    }
+
+    function uintToString(uint v) constant returns (string) {
+        uint maxlength = 100;
+        bytes memory reversed = new bytes(maxlength);
+        uint i = 0;
+        while (v != 0) {
+            uint remainder = v % 10;
+            v = v / 10;
+            reversed[i++] = byte(48 + remainder);
+        }
+        bytes memory s = new bytes(i); // i + 1 is inefficient
+        for (uint j = 0; j < i; j++) {
+            s[j] = reversed[i - j - 1]; // to avoid the off-by-one error
+        }
+        string memory str = string(s);  // memory isn't implicitly convertible to storage
+        return str; // this was missing
     }
 }
