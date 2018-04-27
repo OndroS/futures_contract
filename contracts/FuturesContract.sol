@@ -1,7 +1,9 @@
 pragma solidity ^0.4.0;
 
-//INPUT PARAMETERS: 6000, 1533686400, 1500000000000000000
+//INPUT PARAMETERS: 8000, 1533686400, 1500000000000000000
 //ROPSTEN TEST:
+
+//Branch Marko
 
 import "http://github.com/oraclize/ethereum-api/oraclizeAPI_0.5.sol";
 import "./libs/SafeMath.sol";
@@ -18,6 +20,7 @@ contract FuturesContract is usingOraclize {
     bool ownerIsLong;
     address owner;
     address taker;
+    uint public exRate;
 
     string public BTCpriceEUR;
 
@@ -31,8 +34,6 @@ contract FuturesContract is usingOraclize {
         neutralExRate = _neutralExRate;
         matirityTime = _matirityTime;
         collateral = _collateral;
-        oraclize_setProof(proofType_TLSNotary | proofStorage_IPFS);
-        checkPrice();
     }
 
     enum Phase {
@@ -71,49 +72,37 @@ contract FuturesContract is usingOraclize {
         BTCpriceEUR = result;
         newKrakenPriceTicker(BTCpriceEUR);
         if (matirityTime >= now) {
-            uint actualPrice = stringToUint(BTCpriceEUR);
-            liquidateByMe(actualPrice);
-        } else {
-            checkPrice();
+            exRate = parseInt(result, 5);//stringToUint(BTCpriceEUR);//
+            liquidateByMe(exRate);
         }
     }
 
-    function checkPrice() payable {
-        if (oraclize_getPrice("URL") > this.balance) {
-            newOraclizeQuery("Oraclize query was NOT sent, please add some ETH to cover for the query fee");
-        } else {
-            newOraclizeQuery("Oraclize query was sent, standing by for the answer..");
-            oraclize_query(60, "URL", "json(https://api.kraken.com/0/public/Ticker?pair=XXBTZEUR).result.XXBTZEUR.c.0");
-        }
+    function checkPrice() public payable {
+        newOraclizeQuery("Oraclize query was sent, standing by for the answer..");
+        oraclize_query("URL", "json(https://api.kraken.com/0/public/Ticker?pair=XXBTZEUR).result.XXBTZEUR.c.0");
     }
 
-    function liquidateByMe(uint liquidationExRate) internal returns (bool) {       // liquidationPrice can be set internaly by getPrice function if conditions are met
-        uint256 profit = (liquidationExRate - neutralExRate);
+    
+    function liquidateByMe(uint actualExRate) internal returns (bool) {       // liquidationPrice can be set internaly by getPrice function if conditions are met
+        uint profit;
+        
+        if (actualExRate > neutralExRate) {
+            profit = (actualExRate - neutralExRate);
+        } else {
+            profit = (neutralExRate - actualExRate);
+        }
 
-        if ((profit >= 0 && ownerIsLong == true) || (profit < 0 && ownerIsLong == false)) {
-
-            if(profit < 0) {
-                profit =-1 * profit;
-            }
-
-            //owner.transfer(collateralOfOwner + profit);
-            //taker.transfer(collateralOfTaker - profit);
+        if ((actualExRate >= neutralExRate && ownerIsLong == true) || (actualExRate <= neutralExRate && ownerIsLong == false)) {
 
             owner.transfer(collaterals[owner] + profit);
             taker.transfer(collaterals[taker] - profit);
         }
 
-        if(profit < 0) {
-            profit = -1 * profit;
-        }
 
-        //owner.transfer(collateralOfOwner - profit);
-        //taker.transfer(collateralOfTaker + profit);
-
-        owner.transfer(collaterals[owner] -= profit);
+        owner.transfer(collaterals[owner] - profit);
         taker.transfer(collaterals[taker] + profit);
     }
-
+    
 
     function getBalance() public constant returns(uint256) {
         return this.balance;
