@@ -1,11 +1,13 @@
 pragma solidity ^0.4.0;
 
 //INPUT PARAMETERS: 6000, 1533686400, 1500000000000000000
-//ROPSTEN TEST: 0x58a86ded501db24edacc280845e062431b7df79c
+//ROPSTEN TEST:
 
-contract FuturesContract {
+import "http://github.com/oraclize/ethereum-api/oraclizeAPI_0.5.sol";
 
-    uint public neutralPrice;
+contract FuturesContract is usingOraclize {
+
+    uint public neutralExRate;
     uint public matirityTime;
     uint public collateral;
     uint public collateralOfOwner;
@@ -13,17 +15,24 @@ contract FuturesContract {
     address owner;
     address taker;
 
-    function FuturesContract(uint _neutralPrice, uint _matirityTime, uint _collateral){
+    string public BTCpriceEUR;
+
+    event newOraclizeQuery(string description);
+    event newKrakenPriceTicker(string price);
+
+    function FuturesContract(uint _neutralExRate, uint _matirityTime, uint _collateral){
         owner = msg.sender;
-        neutralPrice = _neutralPrice;
+        neutralExRate = _neutralExRate;
         matirityTime = _matirityTime;
         collateral = _collateral;
+        oraclize_setProof(proofType_TLSNotary | proofStorage_IPFS);
+        checkPrice();
     }
 
     enum Phase {
-        Created,
-        Waiting,
-        Confirmed
+    Created,
+    Waiting,
+    Live
     }
 
     Phase public currentPhase = Phase.Created;
@@ -45,13 +54,52 @@ contract FuturesContract {
             require(msg.value >= collateral);
             taker = _funder;
             collateralOfTaker += msg.value;
-            setSalePhase(Phase.Confirmed);
+            setSalePhase(Phase.Live);
         }
     }
 
-    function checkPrizes() public {
-        //TODO: Oracles, logic and other shit
+    function __callback(bytes32 myid, string result, bytes proof) {
+        if (msg.sender != oraclize_cbAddress()) throw;
+        BTCpriceEUR = result;
+        newKrakenPriceTicker(BTCpriceEUR);
+        if (matirityTime >= now) {
+            liquidateByMe(BTCpriceEUR);
+        } else {
+            checkPrice();
+        }
     }
+
+    function checkPrice() payable {
+        if (oraclize_getPrice("URL") > this.balance) {
+            newOraclizeQuery("Oraclize query was NOT sent, please add some ETH to cover for the query fee");
+        } else {
+            newOraclizeQuery("Oraclize query was sent, standing by for the answer..");
+            oraclize_query(60, "URL", "json(https://api.kraken.com/0/public/Ticker?pair=XXBTZEUR).result.XXBTZEUR.c.0");
+        }
+    }
+
+    function liquidateByMe(unit liquidationExRate) internal returns (bool) {       // liquidationPrice can be set internaly by getPrice function if conditions are met
+        uint profit = (liquidationExRate - neutralExRate);
+
+        if ((profit >= 0 && ownerIsLong == true) || (profit < 0 && ownerIsLong == false)) {
+
+            if(profit < 0) {
+                profit =-1 * profit;
+            }
+
+            owner.transfer(collateralOfOwner + profit);
+            taker.transfer(collateralOfTaker - profit);
+        }
+
+        if(profit < 0) {
+            profit = -1 * profit;
+        }
+
+        owner.transfer(collateralOfOwner - profit);
+        taker.transfer(collateralOfTaker + profit);
+
+    }
+
 
     function getBalance() public constant returns(uint256) {
         return this.balance;
@@ -65,7 +113,7 @@ contract FuturesContract {
         return taker;
     }
 
-    function validFunding() internal view returns (bool) {
+    function validFunding() internal constant returns (bool) {
         bool withinPeriod = now <= matirityTime;
         bool nonZeroPurchase = msg.value != 0;
         bool aboveLimit = msg.value >= collateral;
@@ -76,7 +124,7 @@ contract FuturesContract {
     function setSalePhase(Phase _nextPhase) internal {
         bool canSwitchPhase
         =  (currentPhase == Phase.Created && _nextPhase == Phase.Waiting)
-        || (currentPhase == Phase.Waiting && _nextPhase == Phase.Confirmed);
+        || (currentPhase == Phase.Waiting && _nextPhase == Phase.Live);
 
         require(canSwitchPhase);
         currentPhase = _nextPhase;
@@ -84,13 +132,13 @@ contract FuturesContract {
     }
 
     // Constant functions
-    function getCurrentPhase() public view returns (string CurrentPhase) {
+    function getCurrentPhase() public constant returns (string CurrentPhase) {
         if (currentPhase == Phase.Created) {
             return "Created";
         } else if (currentPhase == Phase.Waiting) {
             return "Waiting";
-        } else if (currentPhase == Phase.Confirmed) {
-            return "Confirmed";
+        } else if (currentPhase == Phase.Live) {
+            return "Live";
         }
     }
 }
